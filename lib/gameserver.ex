@@ -2,20 +2,23 @@ defmodule Gameserver do
   require Logger
   use GenServer
 
+  @default_port 6090
+  @update_time_ms 16
+
   @initial_state %{
     clients: %{}
   }
 
-  @update_time_ms 16
-
   def init(state) do
     # start a socket for network interactions
     # TODO: supervised, so it can restart without restarting the game
-    Task.start_link(Gameserver.Socket, :start, [%{game: self()}])
+    port = state[:port] || @default_port
+    {:ok, socket} = Socket.UDP.open(port)
+    Task.start_link(Gameserver.Socket, :start, [%{socket: socket, game: self(), port: port}])
     # begin running game updates
     schedule_update()
     Logger.debug("Game Process init() Complete: (Self: #{inspect(self())}")
-    {:ok, state}
+    {:ok, Map.put(state, :socket, socket)}
   end
 
   def start_link(_opts) do
@@ -73,6 +76,7 @@ defmodule Gameserver do
       client: client,
       id: :crypto.strong_rand_bytes(32) |> Base.url_encode64() |> binary_part(0, 32),
       color: {0.0, 0.5, 1.0, 1.0},
+      score: 0,
       pos: {0, 0},
       aimpos: {0, 0},
       inputs: %{

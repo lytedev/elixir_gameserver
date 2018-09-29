@@ -4,29 +4,27 @@ defmodule Gameserver.Socket do
   use Task
 
   @server_version "0.1.0"
-  @default_port 6090
 
   def start(opts) do
-    port = opts[:port] || @default_port
-    {:ok, socket} = Socket.UDP.open(port)
-    Logger.info("UDP socket open on 0.0.0.0:" <> to_string(port) <> " - " <> inspect(socket))
-    serve(opts[:game], socket)
+    Logger.info(
+      "UDP socket open on 0.0.0.0:" <> to_string(opts[:port]) <> " - " <> inspect(opts[:socket])
+    )
+
+    serve(opts[:game], opts[:socket])
   end
 
   def serve(game, socket) do
     {:ok, {data, client}} = socket |> Socket.Datagram.recv()
-    Logger.debug("Message Received: #{inspect(data)}\tFrom: #{inspect(client)}")
+    # Logger.debug("Message Received: #{inspect(data)}\tFrom: #{inspect(client)}")
     handle_message(data, client, socket, game)
     serve(game, socket)
   end
 
   defp broadcast(message, socket, game) do
-    "ALL CLIENTS" |> IO.inspect()
     {:ok, clients} = Gameserver.call_get_all_clients(game) |> IO.inspect()
 
     clients
     |> Enum.each(fn {k, v} ->
-      k |> IO.inspect()
       Socket.Datagram.send(socket, message, k)
     end)
   end
@@ -75,14 +73,13 @@ defmodule Gameserver.Socket do
       raw_inputs
       |> to_integer_list.()
       |> input_zipper.()
-      |> IO.inspect()
 
     aimpos = raw_aimpos |> to_integer_list.() |> List.to_tuple()
 
     {:ok, client} =
       Gameserver.call_update_client(game, {client, %{inputs: inputs, aimpos: aimpos}})
 
-    Logger.debug("Update: #{inspect(client)} over #{inspect(socket)}")
+    # Logger.debug("Update: #{inspect(client)} over #{inspect(socket)}")
   end
 
   defp handle_message(m, client, socket, game) do
