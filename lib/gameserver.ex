@@ -2,6 +2,9 @@ defmodule Gameserver do
   require Logger
   use GenServer
 
+  # TODO: cleanup clients that haven't sent data in some time
+  # TODO: handle crashes gracefully with regards to connected clients
+
   @default_port 6090
   @update_time_ms 16
 
@@ -53,8 +56,8 @@ defmodule Gameserver do
     end
   end
 
+  # TODO: handle errors
   def handle_call({:remove_client, client}, _from, state) do
-    # TODO: handle errors
     case remove_client(state, client) do
       {:ok, reply, new_state} -> {:reply, {:ok, reply}, new_state}
       _ -> {:reply, :error, state}
@@ -64,8 +67,12 @@ defmodule Gameserver do
   def handle_call({:update_client, client, data}, _from, state) do
     # TODO: handle errors
     case update_client(state, client, data) do
-      {:ok, reply, new_state} -> {:reply, {:ok, reply}, new_state}
-      _ -> {:reply, :error, state}
+      {:ok, reply, new_state} ->
+        {:reply, {:ok, reply}, new_state}
+
+      _ ->
+        Socket.Datagram.send(state[:socket], "disconnected client_not_found", client)
+        {:reply, :error, state}
     end
   end
 
@@ -78,6 +85,7 @@ defmodule Gameserver do
       color: {0.0, 0.5, 1.0, 1.0},
       score: 0,
       pos: {0, 0},
+      size: {32, 32},
       aimpos: {0, 0},
       inputs: %{
         up: 0,
@@ -105,8 +113,17 @@ defmodule Gameserver do
   end
 
   defp update_client(state, client, data) do
-    client_data = Map.merge(state[:clients][client], data)
-    {:ok, client_data, %{state | clients: %{state[:clients] | client => client_data}}}
+    # TODO: handle errors
+    # Logger.info("Client Update: #{inspect(client)} #{inspect(data)}\nState: #{inspect(state)}")
+
+    case state[:clients][client] do
+      nil ->
+        :error
+
+      client_data ->
+        new_client_data = Map.merge(client_data, data)
+        {:ok, client_data, %{state | clients: %{state[:clients] | client => new_client_data}}}
+    end
   end
 
   # internal update tick stuff
@@ -121,8 +138,40 @@ defmodule Gameserver do
   end
 
   defp game_tick(state) do
+    clients = state[:clients]
+    num_clients = length(Map.keys(clients))
+    # num_clients = length(Map.keys(clients))
+
     schedule_update()
     # Logger.debug("TICK")
+    clients_data =
+      clients
+      |> Enum.map(&client_update_string/1)
+      |> Enum.join(" ")
+
+    payload = "up #{num_clients} #{clients_data}"
+
+    broadcast = fn client ->
+      Logger.info(inspect(client))
+      Logger.info(inspect(state))
+      Socket.Datagram.send(state[:socket], payload, client[:client])
+    end
+
+    clients |> Enum.each(&broadcast.(elem(&1, 1)))
     state
+  end
+
+  defp client_update_string(client) do
+    data = elem(client, 1)
+
+    [
+      data[:size] |> Tuple.to_list() |> Enum.map(&to_string/1) |> Enum.join(","),
+      data[:color] |> Tuple.to_list() |> Enum.map(&to_string/1) |> Enum.join(","),
+      data[:pos] |> Tuple.to_list() |> Enum.map(&to_string/1) |> Enum.join(","),
+      data[:aimpos] |> Tuple.to_list() |> Enum.map(&to_string/1) |> Enum.join(","),
+      data[:score] |> to_string(),
+      data[:name]
+    ]
+    |> Enum.join(" ")
   end
 end

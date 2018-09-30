@@ -20,7 +20,7 @@ defmodule Gameserver.Socket do
     serve(game, socket)
   end
 
-  defp broadcast(message, socket, game) do
+  def broadcast(message, socket, game) do
     {:ok, clients} = Gameserver.call_get_all_clients(game) |> IO.inspect()
 
     clients
@@ -76,8 +76,18 @@ defmodule Gameserver.Socket do
 
     aimpos = raw_aimpos |> to_integer_list.() |> List.to_tuple()
 
-    {:ok, client} =
-      Gameserver.call_update_client(game, {client, %{inputs: inputs, aimpos: aimpos}})
+    case Gameserver.call_update_client(game, {client, %{inputs: inputs, aimpos: aimpos}}) do
+      {:ok, client} ->
+        nil
+
+      _ ->
+        nil
+        # Logger.error(
+        #   "Received bad client update: #{inspect(update_data_string)} from #{inspect(client)} over #{
+        #     inspect(socket)
+        #   }\nState: #{inspect("TODO")}"
+        # )
+    end
 
     # Logger.debug("Update: #{inspect(client)} over #{inspect(socket)}")
   end
