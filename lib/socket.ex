@@ -21,7 +21,7 @@ defmodule Gameserver.Socket do
   end
 
   def broadcast(message, socket, game) do
-    {:ok, clients} = Gameserver.call_get_all_clients(game) |> IO.inspect()
+    {:ok, clients} = Gameserver.call_get_all_clients(game)
 
     clients
     |> Enum.each(fn {k, v} ->
@@ -30,7 +30,8 @@ defmodule Gameserver.Socket do
   end
 
   defp handle_message("l2d_test_game v#{@server_version} connect", client, socket, game) do
-    # TODO: handle errors
+    # TODO: handle errors, report version mismatches
+
     {:ok, new_client} = Gameserver.call_new_client(game, client)
 
     Logger.debug("New Client: #{inspect(new_client)} over #{inspect(socket)}")
@@ -42,6 +43,7 @@ defmodule Gameserver.Socket do
         client
       )
 
+    send_current_clients(client, socket, game)
     broadcast("new_client #{new_client[:id]}", socket, game)
   end
 
@@ -72,6 +74,12 @@ defmodule Gameserver.Socket do
     inputs =
       raw_inputs
       |> to_integer_list.()
+      |> Enum.map(
+        &case &1 do
+          0 -> 0
+          _ -> 1
+        end
+      )
       |> input_zipper.()
 
     aimpos = raw_aimpos |> to_integer_list.() |> List.to_tuple()
@@ -98,5 +106,15 @@ defmodule Gameserver.Socket do
         inspect(socket)
       }"
     )
+  end
+
+  defp send_current_clients(client, socket, game) do
+    {:ok, clients} = Gameserver.call_get_all_clients(game)
+
+    clients
+    |> Enum.filter(fn {k, v} -> k != client end)
+    |> Enum.each(fn {_, data} ->
+      Socket.Datagram.send(socket, "new_client #{data[:id]}", client)
+    end)
   end
 end

@@ -9,6 +9,7 @@ defmodule Gameserver do
   @update_time_ms 16
 
   @initial_state %{
+    last_tick: 0,
     clients: %{}
   }
 
@@ -21,6 +22,7 @@ defmodule Gameserver do
     # begin running game updates
     schedule_update()
     Logger.debug("Game Process init() Complete: (Self: #{inspect(self())}")
+    state = %{state | last_tick: DateTime.utc_now()}
     {:ok, Map.put(state, :socket, socket)}
   end
 
@@ -81,11 +83,13 @@ defmodule Gameserver do
     # TODO: handle errors
     client_content = %{
       client: client,
+      # TODO: handle duplicates
       id: :crypto.strong_rand_bytes(32) |> Base.url_encode64() |> binary_part(0, 32),
       color: {0.0, 0.5, 1.0, 1.0},
       score: 0,
       pos: {0, 0},
       size: {32, 32},
+      speed: 500,
       aimpos: {0, 0},
       inputs: %{
         up: 0,
@@ -94,7 +98,7 @@ defmodule Gameserver do
         right: 0,
         fire: 0
       },
-      name: ""
+      name: "Player"
     }
 
     {:ok, client_content,
@@ -138,30 +142,35 @@ defmodule Gameserver do
   end
 
   defp game_tick(state) do
+    schedule_update()
+
+    tick = DateTime.utc_now()
+    dt = DateTime.diff(tick, state[:last_tick], :microseconds) / 1_000_000
+    # Logger.info(inspect(dt))
+
     clients = state[:clients]
     num_clients = length(Map.keys(clients))
     # num_clients = length(Map.keys(clients))
 
-    schedule_update()
-    # Logger.debug("TICK")
+    state = tick_state(state, dt)
+
     clients_data =
       clients
       |> Enum.map(&client_update_string/1)
-      |> Enum.join(" ")
+      |> Enum.join("\n")
 
-    payload = "up #{num_clients} #{clients_data}"
+    payload = "up #{num_clients}\n#{clients_data}"
 
     broadcast = fn client ->
-      Logger.info(inspect(client))
-      Logger.info(inspect(state))
       Socket.Datagram.send(state[:socket], payload, client[:client])
     end
 
     clients |> Enum.each(&broadcast.(elem(&1, 1)))
-    state
+    %{state | last_tick: tick}
   end
 
   defp client_update_string(client) do
+    # TODO: possibly packet IDs to prevent out-of-order errors?
     data = elem(client, 1)
 
     [
@@ -170,8 +179,24 @@ defmodule Gameserver do
       data[:pos] |> Tuple.to_list() |> Enum.map(&to_string/1) |> Enum.join(","),
       data[:aimpos] |> Tuple.to_list() |> Enum.map(&to_string/1) |> Enum.join(","),
       data[:score] |> to_string(),
-      data[:name]
+      data[:id]
+      # data[:name]
     ]
     |> Enum.join(" ")
+  end
+
+  defp tick_state(state, dt), do: %{state | clients: tick_clients(state[:clients], dt)}
+
+  defp tick_clients(clients, dt),
+    do: clients |> Enum.reduce(clients, fn e, acc -> tick_client(e, acc, dt) end)
+
+  defp tick_client({k, client}, clients, dt) do
+    inputs = client[:inputs]
+    speed = client[:speed]
+    mx = -inputs[:left] + inputs[:right]
+    my = -inputs[:up] + inputs[:down]
+    {x, y} = client[:pos]
+    # TODO: vector library?
+    %{clients | k => %{client | pos: {x + mx * speed * dt, y + my * speed * dt}}}
   end
 end
