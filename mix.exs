@@ -20,6 +20,7 @@ defmodule Gameserver.MixProject do
 
   defp deps do
     [
+      {:distillery, "~> 2.0"},
       {:socket, "~> 0.3.13"}
     ]
   end
