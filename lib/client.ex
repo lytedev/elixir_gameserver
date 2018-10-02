@@ -1,7 +1,7 @@
 defmodule Gameserver.Client do
   # {host, port}
-  @enforce_keys [:client]
-  defstruct id: :crypto.strong_rand_bytes(32) |> Base.url_encode64() |> binary_part(0, 32),
+  @enforce_keys [:client, :id]
+  defstruct id: nil,
             client: nil,
             name: "Player",
             color: {1.0, 1.0, 1.0, 1.0},
@@ -25,11 +25,24 @@ defmodule Gameserver.Client do
             }
 
   def update(client, dt) do
-    move(client, dt)
+    Map.put(
+      client,
+      :weapons,
+      client.weapons
+      |> Enum.reduce(%{}, fn {id, weapon}, weapons ->
+        Map.put(weapons, id, Gameserver.Weapon.update(weapon, dt))
+      end)
+    )
+    |> move(dt)
   end
 
+  def change_name(client, new_name), do: Map.put(client, :name, new_name)
   def firing?(client), do: client.inputs.fire == 1
   def active_weapon(client), do: client.weapons[client.active_weapon]
+
+  def update_weapon(client, weapon_id, weapon) do
+    Map.put(client, :weapons, Map.put(client.weapons, weapon_id, weapon))
+  end
 
   def update_packet(client) do
     [
@@ -48,9 +61,10 @@ defmodule Gameserver.Client do
   @client_update_packet_regex ~r/^(\d+),(\d+),(\d+),(\d+),(\d+) ([0-9\-\.]+),([0-9\-\.]+)/
 
   def parse_client_update_packet(payload) do
-    p = Regex.run(@client_update_packet_regex, payload) |> IO.inspect()
+    p = tl(Regex.run(@client_update_packet_regex, payload))
 
-    [up, down, left, right, fire, apx, apy] = tl(p) |> Enum.map(&Float.parse/1)
+    [up, down, left, right, fire, apx, apy] =
+      p |> Enum.map(&Integer.parse/1) |> Enum.map(&elem(&1, 0))
 
     inputs = %{
       up: up,

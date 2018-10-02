@@ -3,22 +3,22 @@ defmodule Gameserver.Socket do
 
   use Task
 
-  @server_version "0.1.2"
+  # TODO: binary protocol
 
   def start(opts) do
     Logger.info("Socket Open: udp://0.0.0.0:#{to_string(opts.port)} - #{inspect(opts.socket)}")
 
-    serve(opts.game, opts.socket)
+    serve(opts.game, opts.socket, opts.server_version)
   end
 
   @doc """
   The socket loop.
   """
-  def serve(game, socket) do
+  def serve(game, socket, server_version) do
     {:ok, {data, client}} = Socket.Datagram.recv(socket)
     # Logger.debug("Message Received: #{inspect(data)}\tFrom: #{inspect(client)}")
-    handle_message(data, client, socket, game)
-    serve(game, socket)
+    handle_message(data, client, socket, game, server_version)
+    serve(game, socket, server_version)
   end
 
   def broadcast(message, socket, game, nil) do
@@ -32,35 +32,30 @@ defmodule Gameserver.Socket do
     end)
   end
 
-  # message handlers
-  defp handle_message("l2d_test_game v#{@server_version} connect", client, socket, game) do
-    # TODO: handle errors
-    {:ok, new_client} = Gameserver.call_new_client(game, client)
+  defp handle_message("l2d_test_game v" <> v, client, socket, game, server_version) do
+    cond do
+      # TODO: check that "connect" is in there
+      # extract initial name?
 
-    :ok =
-      Socket.Datagram.send(
-        socket,
-        "l2d_test_game v#{@server_version} accepted #{new_client.id}",
-        client
-      )
+      String.starts_with?(v, server_version) ->
+        {:ok, new_client} = Gameserver.call_new_client(game, client)
+
+      true ->
+        :ok =
+          Socket.Datagram.send(
+            socket,
+            "disconnected invalid_version_connect client:#{v} server:#{server_version} connect",
+            client
+          )
+    end
   end
 
-  defp handle_message("l2d_test_game v" <> v, client, socket, game) do
-    :ok =
-      Socket.Datagram.send(
-        socket,
-        "disconnected invalid_version_connect client:#{v} server:#{@server_version} connect",
-        client
-      )
-  end
-
-  defp handle_message("quit", client, socket, game) do
+  defp handle_message("quit", client, socket, game, server_version) do
     {:ok, old_client} = Gameserver.call_remove_client(game, client)
   end
 
-  defp handle_message("up " <> update_data_string, client, socket, game) do
-    {:ok, inputs, aimpos} =
-      Gameserver.Client.parse_client_update_packet(update_data_string) |> IO.inspect()
+  defp handle_message("up " <> update_data_string, client, socket, game, server_version) do
+    {:ok, inputs, aimpos} = Gameserver.Client.parse_client_update_packet(update_data_string)
 
     case Gameserver.call_update_client(game, {client, %{inputs: inputs, aimpos: aimpos}}) do
       {:ok, client} ->
@@ -78,7 +73,14 @@ defmodule Gameserver.Socket do
     # Logger.debug("Update: #{inspect(client)} over #{inspect(socket)}")
   end
 
-  defp handle_message(m, client, socket, game) do
+  defp handle_message("name " <> name, client, socket, game, server_version) do
+    case Gameserver.call_update_client_name(game, client, name) do
+      {:ok, new_name} -> nil
+      _ -> nil
+    end
+  end
+
+  defp handle_message(m, client, socket, game, _) do
     # Logger.debug(
     # "Bad Message Received: #{inspect(m <> <<0>>)} from #{inspect(client)} over #{
     # inspect(socket)
