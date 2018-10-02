@@ -22,7 +22,7 @@ defmodule Gameserver do
 
     Logger.debug("Game Process init() Complete: (Self: #{inspect(self())}")
 
-    {:ok, %{state | last_tick: DateTime.utc_now(), socket: socket}}
+    {:ok, Map.merge(state, %{last_tick: DateTime.utc_now(), socket: socket})}
   end
 
   def open_socket(state) do
@@ -49,13 +49,16 @@ defmodule Gameserver do
     do: GenServer.call(game, {:update_client, client, data})
 
   # TODO: handle errors
-  defp handle_call_wrapper({:ok, reply, state}, _), do: {:reply, {:ok, reply}, state}
+  defp handle_call_wrapper(res, error_callback \\ fn x -> x end)
 
-  defp handle_call_wrapper(_, error_callback \\ fn x -> x end),
-    do: {:reply, :error, state} |> error_callback()
+  defp handle_call_wrapper({:ok, reply, state}, _error_callback),
+    do: {:reply, {:ok, reply}, state}
+
+  defp handle_call_wrapper({_, _reply, state}, error_callback),
+    do: {:reply, :error, state} |> error_callback.()
 
   # genserver callbacks
-  def handle_call(:get_all_clients, _from, state), do: {:reply, {:ok, state[:clients]}, state}
+  def handle_call(:get_all_clients, _from, state), do: {:reply, {:ok, state.clients}, state}
 
   def handle_call({:new_client, client}, _from, state),
     do: handle_call_wrapper(new_client(state, client))
@@ -65,7 +68,7 @@ defmodule Gameserver do
 
   def handle_call({:update_client, client, data}, _from, state) do
     handle_call_wrapper(update_client(state, client, data), fn x ->
-      Socket.Datagram.send(state[:socket], "disconnected client_not_found", client)
+      Socket.Datagram.send(state.socket, "disconnected client_not_found", client)
       x
     end)
   end
@@ -73,67 +76,75 @@ defmodule Gameserver do
   # mutations
   defp new_client(state, client) do
     new_client_data = %Gameserver.Client{client: client}
-    update_client(state, client, new_client_data)
+    state = Map.put(state, :clients, Map.put(state.clients, client, new_client_data))
 
     # send all current clients to new client
-    clients
-    |> Enum.filter(fn {k, v} -> k != client end)
+    state.clients
+    |> Enum.filter(fn {k, _v} -> k != client end)
     |> Enum.each(fn {_, data} ->
-      Socket.Datagram.send(state[:socket], "new_client #{data[:id]}", client)
+      Socket.Datagram.send(state.socket, "new_client #{data.id}", client)
     end)
 
+    Logger.debug("Client Connected: #{inspect(client)}\nNew State: #{inspect(state)}")
+
+    # alert existing clients of new client
     Gameserver.Socket.broadcast(
-      "new_client #{new_client_data[:id]}",
-      state[:socket],
+      "new_client #{new_client_data.id}",
+      state.socket,
       self(),
-      state[:clients]
+      state.clients
     )
+
+    {:ok, new_client_data, state}
   end
 
   defp update_client(state, client, data) do
-    case state[:clients][client] do
+    case state.clients[client] do
       nil ->
         :error
 
       client_data ->
         merged_data = Map.merge(client_data, data)
-        {:ok, merged_data, %{state | clients: %{state[:clients] | client => merged_data}}}
+        {:ok, merged_data, %{state | clients: %{state.clients | client => merged_data}}}
     end
   end
 
   defp remove_client(state, client) do
     # TODO: handle errors
-    {old_client, clients} = Map.pop(state[:clients], client)
-    {:ok, old_client, %{state | clients: clients}}
+    {old_client, clients} = Map.pop(state.clients, client)
+    state = %{state | clients: clients}
+
+    Logger.debug("Client Disconnected: #{inspect(client)}\nNew State: #{inspect(state)}")
 
     Gameserver.Socket.broadcast(
-      "remove_client #{old_client[:id]}",
-      state[:socket],
+      "remove_client #{old_client.id}",
+      state.socket,
       self(),
-      state[:clients]
+      state.clients
     )
+
+    {:ok, old_client, state}
   end
 
   defp new_bullet(state, bullet) do
-    id = state[:next_bullet_id]
+    id = state.next_bullet_id
     update_bullet(Map.put(state, :next_bullet_id, id + 1), id, bullet)
   end
 
   defp update_bullet(state, id, bullet) do
-    case state[:bullets][id] do
+    case state.bullets[id] do
       nil ->
         :error
 
       bullet_data ->
         merged_bullet_data = Map.merge(bullet_data, bullet)
 
-        {:ok, merged_bullet_data,
-         %{state | clients: %{state[:bullets] | id => merged_bullet_data}}}
+        {:ok, merged_bullet_data, %{state | clients: %{state.bullets | id => merged_bullet_data}}}
     end
   end
 
   defp remove_bullet(state, id) do
-    {removed_bullet, remaining_bullets} = Map.pop(state[:bullets], id)
+    {removed_bullet, remaining_bullets} = Map.pop(state.bullets, id)
     {:ok, removed_bullet, %{state | bullets: remaining_bullets}}
   end
 
@@ -144,7 +155,7 @@ defmodule Gameserver do
 
   defp get_dt(state) do
     now = DateTime.utc_now()
-    {DateTime.diff(now, state[:last_tick], :microseconds) / 1_000_000, now}
+    {DateTime.diff(now, state.last_tick, :microseconds) / 1_000_000, now}
   end
 
   defp game_tick(state) do
@@ -152,8 +163,8 @@ defmodule Gameserver do
 
     {dt, new_last_tick} = get_dt(state)
 
-    clients = state[:clients]
-    bullets = state[:bullets]
+    clients = state.clients
+    bullets = state.bullets
 
     num_clients = length(Map.keys(clients))
     num_bullets = length(Map.keys(bullets))
@@ -176,32 +187,28 @@ defmodule Gameserver do
 
     # send packet to all clients
     clients
-    |> Enum.each(fn {client, _} -> Socket.Datagram.send(state[:socket], payload, client) end)
+    |> Enum.each(fn {client, _} -> Socket.Datagram.send(state.socket, payload, client) end)
 
     Map.put(state, :last_tick, new_last_tick)
   end
 
-  defp tick_state(state, dt),
-    do: %{
-      state
-      | clients: tick_clients(state, dt),
-        bullets: tick_bullets(state, dt)
-    }
+  defp tick_state(state, dt), do: state |> tick_clients(dt) |> tick_bullets(dt)
 
-  defp tick_bullets(state, dt),
-    do:
-      state[:bullets]
-      |> Enum.reduce(state[:bullets], fn e, acc -> tick_bullet(e, acc, state, dt) end)
+  defp tick_bullets(state, dt) do
+    state.bullets
+    |> Enum.reduce(state, fn c, state -> tick_bullet(c, state, dt) end)
+  end
 
-  defp tick_clients(state, dt),
-    do:
-      state[:clients]
-      |> Enum.reduce(state[:clients], fn e, acc -> tick_client(e, acc, state, dt) end)
+  defp tick_clients(state, dt) do
+    state.clients |> Enum.reduce(state, fn c, state -> tick_client(c, state, dt) end)
+  end
 
-  defp tick_client({k, client}, clients, state, dt),
-    do: Map.put(clients, k, Gameserver.Player.update(client, dt))
+  defp tick_client({k, client}, state, dt) do
+    # TODO: firing logic
+    state |> update_client(k, Gameserver.Client.update(client, dt))
+  end
 
-  defp tick_bullet({k, bullet}, bullets, state, dt) do
-    Map.put(bullets, k, Gameserver.Bullet.update(bullet, dt))
+  defp tick_bullet({k, bullet}, state, dt) do
+    state |> update_bullet(k, Gameserver.Bullet.update(bullet, dt))
   end
 end

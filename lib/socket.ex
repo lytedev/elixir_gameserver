@@ -6,11 +6,9 @@ defmodule Gameserver.Socket do
   @server_version "0.1.2"
 
   def start(opts) do
-    Logger.info(
-      "Socket Open: udp://0.0.0.0:#{to_string(opts[:port])} - #{inspect(opts[:socket])}"
-    )
+    Logger.info("Socket Open: udp://0.0.0.0:#{to_string(opts.port)} - #{inspect(opts.socket)}")
 
-    serve(opts[:game], opts[:socket])
+    serve(opts.game, opts.socket)
   end
 
   @doc """
@@ -37,35 +35,32 @@ defmodule Gameserver.Socket do
   # message handlers
   defp handle_message("l2d_test_game v#{@server_version} connect", client, socket, game) do
     # TODO: handle errors
-
     {:ok, new_client} = Gameserver.call_new_client(game, client)
-
-    Logger.debug("New Client: #{inspect(new_client)} over #{inspect(socket)}")
 
     :ok =
       Socket.Datagram.send(
         socket,
-        "l2d_test_game v#{@server_version} accepted #{new_client[:id]}",
+        "l2d_test_game v#{@server_version} accepted #{new_client.id}",
         client
       )
   end
 
-  defp handle_message("l2d_test_game v" <> version <> " connect", client, socket, game) do
+  defp handle_message("l2d_test_game v" <> v, client, socket, game) do
     :ok =
       Socket.Datagram.send(
         socket,
-        "disconnected invalid_version client:#{version} server:#{@server_version}",
+        "disconnected invalid_version_connect client:#{v} server:#{@server_version} connect",
         client
       )
   end
 
   defp handle_message("quit", client, socket, game) do
     {:ok, old_client} = Gameserver.call_remove_client(game, client)
-    Logger.debug("Client Disconnected: #{inspect(old_client)} over #{inspect(socket)}")
   end
 
   defp handle_message("up " <> update_data_string, client, socket, game) do
-    {:ok, inputs, aimpos} = Gameserver.Client.parse_client_update_packet(update_data_string)
+    {:ok, inputs, aimpos} =
+      Gameserver.Client.parse_client_update_packet(update_data_string) |> IO.inspect()
 
     case Gameserver.call_update_client(game, {client, %{inputs: inputs, aimpos: aimpos}}) do
       {:ok, client} ->

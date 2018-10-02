@@ -10,9 +10,9 @@ defmodule Gameserver.Weapon do
   def generate_bullet(weapon, pos, direction) do
     %Gameserver.Bullet{
       pos: pos,
-      vel: direction |> Graphmath.Vec2.normalize() |> Graphmath.Vec2.scale(weapon[:bullet_speed]),
-      lifetime: weapon[:bullet_lifetime],
-      damage: weapon[:damage]
+      vel: direction |> Graphmath.Vec2.normalize() |> Graphmath.Vec2.scale(weapon.bullet_speed),
+      lifetime: weapon.bullet_lifetime,
+      damage: weapon.damage
     }
   end
 end
