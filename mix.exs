@@ -4,7 +4,7 @@ defmodule Gameserver.MixProject do
   def project do
     [
       app: :gameserver,
-      version: "0.1.0",
+      version: "0.1.1",
       elixir: "~> 1.7",
       start_permanent: Mix.env() == :prod,
       deps: deps()
@@ -20,6 +20,8 @@ defmodule Gameserver.MixProject do
 
   defp deps do
     [
+      {:math, "~> 0.3"},
+      {:graphmath, "~> 1.0"},
       {:distillery, "~> 2.0"},
       {:socket, "~> 0.3.13"}
     ]
