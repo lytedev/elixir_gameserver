@@ -11,10 +11,11 @@ defmodule Gameserver.Client do
             pos: @default_pos,
             aimpos: {0, 0},
             size: {32, 32},
-            speed: 100,
+            speed: 300,
             health: 100,
             max_health: 100,
             respawn_time: 0,
+            since_last_update: 0,
             active_weapon: 0,
             active_secondary_weapon: 1,
             weapons: %{
@@ -34,7 +35,9 @@ defmodule Gameserver.Client do
     # TODO: use function pattern matching instead of all this cond?
     cond do
       client.respawn_time > 0 ->
-        new_client = client |> Map.put(:respawn_time, client.respawn_time - dt)
+        new_client =
+          client
+          |> Map.put(:respawn_time, client.respawn_time - dt)
 
         cond do
           new_client.respawn_time <= 0 ->
@@ -63,6 +66,7 @@ defmodule Gameserver.Client do
         )
         |> move(dt)
     end
+    |> Map.put(:since_last_update, client.since_last_update + dt)
   end
 
   def set_pos(client, pos), do: Map.put(client, :pos, pos)

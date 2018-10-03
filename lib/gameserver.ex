@@ -83,8 +83,12 @@ defmodule Gameserver do
   def handle_call({:new_client, client, opts}, _from, state),
     do: handle_call_wrapper(new_client(state, client, opts))
 
-  def handle_call({:remove_client, client}, _from, state),
-    do: handle_call_wrapper(remove_client(state, client))
+  def handle_call({:remove_client, client}, _from, state) do
+    handle_call_wrapper(remove_client(state, client), fn x ->
+      Socket.Datagram.send(state.socket, "disconnected client_not_found", client)
+      x
+    end)
+  end
 
   def handle_call({:update_client, client, data}, _from, state) do
     handle_call_wrapper(update_client(state, client, data), fn x ->
@@ -103,6 +107,12 @@ defmodule Gameserver do
     Keyword.put(opts, :name, opts[:name] || new_client_data)
 
     new_client_data = Gameserver.Client.change_name(new_client_data, opts[:name])
+
+    color = %{
+      "daniel" => {0, 0.5, 1.0, 1.0}
+    }
+
+    new_client_data = %{new_client_data | color: Map.get(color, opts[:name], {1, 1, 1, 1})}
 
     # alert existing clients of new client
     Gameserver.Socket.broadcast(
@@ -368,68 +378,75 @@ defmodule Gameserver do
   defp tick_client({k, client}, state, dt) do
     {:ok, updated_client, state} = update_client(state, k, Gameserver.Client.update(client, dt))
 
-    state =
-      Enum.reduce(state.barrels, state, fn {barrel_id, barrel}, state ->
-        {w, h} = barrel.size
-        # average of two dimensions and halved for radius
-        r = (w + h) / 4
-        # add client size to radius
-        {w, h} = client.size
-        r = r + (w + h) / 4
+    cond do
+      updated_client.since_last_update >= 10 ->
+        {:ok, _, state} = remove_client(state, k)
+        state
 
-        case Gameserver.Barrel.check_collide_circle(
-               client.pos,
-               updated_client.pos,
-               barrel.pos,
-               r
-             ) do
+      true ->
+        state =
+          Enum.reduce(state.barrels, state, fn {barrel_id, barrel}, state ->
+            {w, h} = barrel.size
+            # average of two dimensions and halved for radius
+            r = (w + h) / 4
+            # add client size to radius
+            {w, h} = client.size
+            r = r + (w + h) / 4
+
+            case Gameserver.Barrel.check_collide_circle(
+                   client.pos,
+                   updated_client.pos,
+                   barrel.pos,
+                   r
+                 ) do
+              true ->
+                p =
+                  Graphmath.Vec2.add(
+                    barrel.pos,
+                    Graphmath.Vec2.scale(
+                      Graphmath.Vec2.normalize(
+                        Graphmath.Vec2.subtract(updated_client.pos, barrel.pos)
+                      ),
+                      r
+                    )
+                  )
+
+                updated_client
+
+                {:ok, _, state} =
+                  update_client(
+                    state,
+                    k,
+                    Gameserver.Client.set_pos(updated_client, p)
+                  )
+
+                state
+
+              _ ->
+                state
+            end
+          end)
+
+        state =
+          case Gameserver.Client.firing?(client) &&
+                 Gameserver.Client.active_weapon(client) |> Gameserver.Weapon.can_fire?() do
+            true ->
+              {:ok, _, state} = fire_client_active_weapon(state, k)
+              state
+
+            false ->
+              state
+          end
+
+        case Gameserver.Client.secondary_firing?(client) &&
+               Gameserver.Client.active_secondary_weapon(client) |> Gameserver.Weapon.can_fire?() do
           true ->
-            p =
-              Graphmath.Vec2.add(
-                barrel.pos,
-                Graphmath.Vec2.scale(
-                  Graphmath.Vec2.normalize(
-                    Graphmath.Vec2.subtract(updated_client.pos, barrel.pos)
-                  ),
-                  r
-                )
-              )
-
-            updated_client |> IO.inspect()
-
-            {:ok, _, state} =
-              update_client(
-                state,
-                k,
-                Gameserver.Client.set_pos(updated_client, p) |> IO.inspect()
-              )
-
+            {:ok, _, state} = fire_client_active_secondary_weapon(state, k)
             state
 
-          _ ->
+          false ->
             state
         end
-      end)
-
-    state =
-      case Gameserver.Client.firing?(client) &&
-             Gameserver.Client.active_weapon(client) |> Gameserver.Weapon.can_fire?() do
-        true ->
-          {:ok, _, state} = fire_client_active_weapon(state, k)
-          state
-
-        false ->
-          state
-      end
-
-    case Gameserver.Client.secondary_firing?(client) &&
-           Gameserver.Client.active_secondary_weapon(client) |> Gameserver.Weapon.can_fire?() do
-      true ->
-        {:ok, _, state} = fire_client_active_secondary_weapon(state, k)
-        state
-
-      false ->
-        state
     end
   end
 

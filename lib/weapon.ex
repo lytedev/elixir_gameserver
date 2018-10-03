@@ -41,7 +41,7 @@ defmodule Gameserver.Weapon do
       bullet_spawn_offset: 0.06,
       bullet_speed: 500,
       bullet_lifetime: 3,
-      bullet_damage: 10,
+      bullet_damage: 20,
       cooldown: 0
     }
   end
@@ -50,11 +50,11 @@ defmodule Gameserver.Weapon do
     %Gameserver.Weapon{
       name: "Machinegun",
       type: 1,
-      fire_rate: 0.05,
+      fire_rate: 0.03,
       bullet_spawn_offset: 0.035,
       bullet_speed: 1500,
       bullet_lifetime: 0.25,
-      bullet_damage: 3,
+      bullet_damage: 1,
       cooldown: 0
     }
   end

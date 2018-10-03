@@ -40,13 +40,6 @@ defmodule Gameserver.Bullet do
     d = Graphmath.Vec2.add(bullet.pos, p)
     f = Graphmath.Vec2.subtract(pos, d)
     l = Graphmath.Vec2.length(f)
-    res = l <= r
-
-    if res do
-      IO.inspect(f)
-      IO.inspect(l)
-    end
-
-    res
+    l <= r
   end
 end

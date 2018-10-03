@@ -77,7 +77,10 @@ defmodule Gameserver.Socket do
   defp handle_message("up " <> update_data_string, client, socket, game, server_version) do
     {:ok, inputs, aimpos} = Gameserver.Client.parse_client_update_packet(update_data_string)
 
-    case Gameserver.call_update_client(game, {client, %{inputs: inputs, aimpos: aimpos}}) do
+    case Gameserver.call_update_client(
+           game,
+           {client, %{inputs: inputs, aimpos: aimpos, since_last_update: 0}}
+         ) do
       {:ok, client} ->
         nil
 
