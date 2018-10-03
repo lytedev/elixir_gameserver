@@ -1,10 +1,14 @@
 defmodule Gameserver.Bullet do
-  @enforce_keys [:pos, :vel, :lifetime, :damage]
+  @enforce_keys [:type, :pos, :vel, :lifetime, :damage, :owner]
 
-  defstruct [:pos, :vel, :lifetime, :damage]
+  defstruct [:type, :pos, :vel, :lifetime, :damage, :owner]
 
   def dead?(bullet) do
     bullet.lifetime <= 0
+  end
+
+  def die(bullet) do
+    Map.put(bullet, :lifetime, 0)
   end
 
   def update(bullet, dt) do
@@ -20,5 +24,14 @@ defmodule Gameserver.Bullet do
       id |> to_string()
     ]
     |> Enum.join(" ")
+  end
+
+  @doc """
+  Adapted from https://stackoverflow.com/questions/1073336/circle-line-segment-collision-detection-algorithm
+  """
+  def check_collide_circle(bullet, new_pos, pos, r) do
+    d1 = Graphmath.Vec2.subtract(new_pos, bullet.pos)
+    d2 = Graphmath.Vec2.subtract(pos, bullet.pos)
+    Graphmath.Vec2.length(Graphmath.Vec2.project(d2, d1)) <= r
   end
 end

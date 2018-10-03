@@ -10,7 +10,7 @@ defmodule Gameserver do
   @update_time_ms 16
 
   @initial_state %{
-    server_version: "0.1.2",
+    server_version: "0.1.3",
     last_tick: 0,
     clients: %{},
     bullets: %{},
@@ -45,7 +45,7 @@ defmodule Gameserver do
 
   # internal helpers
   def call_get_all_clients(game), do: GenServer.call(game, :get_all_clients)
-  def call_new_client(game, client), do: GenServer.call(game, {:new_client, client})
+  def call_new_client(game, client, opts), do: GenServer.call(game, {:new_client, client, opts})
   def call_remove_client(game, client), do: GenServer.call(game, {:remove_client, client})
 
   def call_update_client(game, {client, data}),
@@ -66,8 +66,8 @@ defmodule Gameserver do
   # genserver callbacks
   def handle_call(:get_all_clients, _from, state), do: {:reply, {:ok, state.clients}, state}
 
-  def handle_call({:new_client, client}, _from, state),
-    do: handle_call_wrapper(new_client(state, client))
+  def handle_call({:new_client, client, opts}, _from, state),
+    do: handle_call_wrapper(new_client(state, client, opts))
 
   def handle_call({:remove_client, client}, _from, state),
     do: handle_call_wrapper(remove_client(state, client))
@@ -80,11 +80,15 @@ defmodule Gameserver do
   end
 
   # mutations
-  defp new_client(state, client) do
+  defp new_client(state, client, opts) do
     new_client_data = %Gameserver.Client{
       client: client,
       id: :crypto.strong_rand_bytes(32) |> Base.url_encode64() |> binary_part(0, 32)
     }
+
+    Keyword.put(opts, :name, opts[:name] || new_client_data)
+
+    new_client_data = Gameserver.Client.change_name(new_client_data, opts[:name])
 
     # alert existing clients of new client
     Gameserver.Socket.broadcast(
@@ -151,13 +155,13 @@ defmodule Gameserver do
 
     # alert existing clients of new bullet
     Gameserver.Socket.broadcast(
-      "new_bullet #{Gameserver.Bullet.update_packet(id, bullet)}",
+      "new_bullet #{bullet.owner} #{bullet.type} #{Gameserver.Bullet.update_packet(id, bullet)}",
       state.socket,
       self(),
       state.clients
     )
 
-    {:ok, bullet, Map.put(state, :next_bullet_id, id + 1)} |> IO.inspect()
+    {:ok, bullet, Map.put(state, :next_bullet_id, id + 1)}
   end
 
   defp update_bullet(state, id, bullet) do
@@ -186,6 +190,22 @@ defmodule Gameserver do
     {:ok, removed_bullet, %{state | bullets: remaining_bullets}}
   end
 
+  defp fire_client_active_secondary_weapon(state, client_key) do
+    client = state.clients[client_key]
+    weapon = Gameserver.Weapon.fired(Gameserver.Client.active_secondary_weapon(client))
+
+    {:ok, _, state} =
+      update_client(
+        state,
+        client_key,
+        Gameserver.Client.update_weapon(client, client.active_secondary_weapon, weapon)
+      )
+
+    {mx, my} = Graphmath.Vec2.subtract(client.aimpos, client.pos)
+    bullet = Gameserver.Weapon.generate_bullet(weapon, client.pos, {mx, my}, client.id)
+    new_bullet(state, bullet)
+  end
+
   defp fire_client_active_weapon(state, client_key) do
     client = state.clients[client_key]
     weapon = Gameserver.Weapon.fired(Gameserver.Client.active_weapon(client))
@@ -198,7 +218,7 @@ defmodule Gameserver do
       )
 
     {mx, my} = Graphmath.Vec2.subtract(client.aimpos, client.pos)
-    bullet = Gameserver.Weapon.generate_bullet(weapon, client.pos, {mx, my})
+    bullet = Gameserver.Weapon.generate_bullet(weapon, client.pos, {mx, my}, client.id)
     new_bullet(state, bullet)
   end
 
@@ -271,10 +291,21 @@ defmodule Gameserver do
   defp tick_client({k, client}, state, dt) do
     {:ok, _, state} = update_client(state, k, Gameserver.Client.update(client, dt))
 
-    case Gameserver.Client.firing?(client) &&
-           Gameserver.Client.active_weapon(client) |> Gameserver.Weapon.can_fire?() do
+    state =
+      case Gameserver.Client.firing?(client) &&
+             Gameserver.Client.active_weapon(client) |> Gameserver.Weapon.can_fire?() do
+        true ->
+          {:ok, _, state} = fire_client_active_weapon(state, k)
+          state
+
+        false ->
+          state
+      end
+
+    case Gameserver.Client.secondary_firing?(client) &&
+           Gameserver.Client.active_secondary_weapon(client) |> Gameserver.Weapon.can_fire?() do
       true ->
-        {:ok, _, state} = fire_client_active_weapon(state, k)
+        {:ok, _, state} = fire_client_active_secondary_weapon(state, k)
         state
 
       false ->
@@ -282,18 +313,86 @@ defmodule Gameserver do
     end
   end
 
-  defp tick_bullet({k, bullet}, state, dt) do
+  defp tick_bullet({k, orig_bullet}, state, dt) do
+    # TODO: cleanup
     # Logger.warn("#{inspect({{k, bullet}, state, dt})}")
-    bullet = Gameserver.Bullet.update(bullet, dt)
+    updated_bullet = Gameserver.Bullet.update(orig_bullet, dt)
+    owner = get_client_by_id(state, updated_bullet.owner)
 
-    case Gameserver.Bullet.dead?(bullet) do
+    {updated_bullet, state} =
+      Enum.reduce(
+        state.clients |> Enum.filter(fn {key, client} -> client.respawn_time <= 0 end),
+        {updated_bullet, state},
+        fn {client_key, client}, {updated_bullet, state} ->
+          {x, y} = client.size
+          # average of two dimensions and halved for radius
+          r = (x + y) / 4
+
+          case Gameserver.Bullet.check_collide_circle(
+                 orig_bullet,
+                 updated_bullet.pos,
+                 client.pos,
+                 r
+               ) do
+            true ->
+              old_health = client.health
+
+              {_, new_client, new_state} =
+                update_client(
+                  state,
+                  client_key,
+                  Gameserver.Client.damage(client, orig_bullet.damage)
+                )
+
+              # TODO: track deaths
+
+              new_health = new_client.health
+
+              new_state =
+                cond do
+                  old_health > 0 && new_health <= 0 && owner != nil ->
+                    Gameserver.Socket.screen_message(
+                      owner.name <> " killed " <> new_client.name <> ". (#{owner.score + 1})",
+                      new_state.socket,
+                      new_state.clients
+                    )
+
+                    {:ok, _, new_state} =
+                      update_client(
+                        new_state,
+                        owner.client,
+                        Gameserver.Client.inc_score(owner)
+                      )
+
+                    new_state
+
+                  true ->
+                    new_state
+                end
+
+              {Gameserver.Bullet.die(updated_bullet), new_state}
+
+            _ ->
+              {updated_bullet, state}
+          end
+        end
+      )
+
+    case Gameserver.Bullet.dead?(updated_bullet) do
       true ->
         {_, _, state} = remove_bullet(state, k)
         state
 
       _ ->
-        {_, _, state} = update_bullet(state, k, bullet)
+        {_, _, state} = update_bullet(state, k, updated_bullet)
         state
+    end
+  end
+
+  defp get_client_by_id(state, id) do
+    case Enum.filter(state.clients, fn {_, c} -> c.id == id end) do
+      [{_, client}] -> client
+      _ -> nil
     end
   end
 end

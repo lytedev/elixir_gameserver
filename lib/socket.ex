@@ -21,11 +21,15 @@ defmodule Gameserver.Socket do
     serve(game, socket, server_version)
   end
 
+  def screen_message(message, socket, clients) do
+    broadcast("msg " <> message, socket, nil, clients)
+  end
+
   def broadcast(message, socket, game, nil) do
     broadcast(message, socket, game, Gameserver.call_get_all_clients(game))
   end
 
-  def broadcast(message, socket, game, clients) do
+  def broadcast(message, socket, _, clients) do
     clients
     |> Enum.each(fn {k, v} ->
       Socket.Datagram.send(socket, message, k)
@@ -33,12 +37,28 @@ defmodule Gameserver.Socket do
   end
 
   defp handle_message("l2d_test_game v" <> v, client, socket, game, server_version) do
+    name =
+      case Regex.run(~r/connect ([[:graph:]]+)/, v) do
+        n when n in [:error, nil] ->
+          :ok =
+            Socket.Datagram.send(
+              socket,
+              "disconnected invalid_name",
+              client
+            )
+
+          nil
+
+        [_, name | _] ->
+          name
+      end
+
     cond do
       # TODO: check that "connect" is in there
       # extract initial name?
 
       String.starts_with?(v, server_version) ->
-        {:ok, new_client} = Gameserver.call_new_client(game, client)
+        {:ok, new_client} = Gameserver.call_new_client(game, client, name: name)
 
       true ->
         :ok =
