@@ -14,7 +14,9 @@ defmodule Gameserver do
     last_tick: 0,
     clients: %{},
     bullets: %{},
-    next_bullet_id: 0
+    barrels: %{},
+    next_bullet_id: 0,
+    next_barrel_id: 0
   }
 
   def init(state) do
@@ -41,7 +43,19 @@ defmodule Gameserver do
     {:ok, socket, pid}
   end
 
-  def start_link(_opts), do: GenServer.start_link(__MODULE__, @initial_state)
+  def start_link(_opts), do: GenServer.start_link(__MODULE__, generate_barrels(@initial_state))
+
+  defp generate_barrels(state) do
+    Map.put(
+      state,
+      :barrels,
+      Enum.reduce(0..19, %{}, fn id, barrels ->
+        Map.put(barrels, id, %Gameserver.Barrel{
+          pos: {:rand.uniform(1280 - 12), :rand.uniform(720 - 12)}
+        })
+      end)
+    )
+  end
 
   # internal helpers
   def call_get_all_clients(game), do: GenServer.call(game, :get_all_clients)
@@ -109,13 +123,35 @@ defmodule Gameserver do
         client
       )
 
-    # send all current clients to new client
+    # send all current data to new client
     state.clients
     # |> Enum.filter(fn {k, _} -> k != client end)
     |> Enum.each(fn {_, data} ->
       payload = "new_client #{data.id} #{data.name}"
       Socket.Datagram.send(state.socket, payload, client)
       Logger.debug(payload)
+    end)
+
+    # send bullets
+    state.bullets
+    |> Enum.each(fn {id, bullet} ->
+      Gameserver.Socket.broadcast(
+        "new_bullet #{Gameserver.Bullet.init_packet(id, bullet)}",
+        state.socket,
+        self(),
+        state.clients
+      )
+    end)
+
+    # send barrels
+    state.barrels
+    |> Enum.each(fn {id, barrel} ->
+      Gameserver.Socket.broadcast(
+        "new_barrel #{Gameserver.Barrel.init_packet(id, barrel)}",
+        state.socket,
+        self(),
+        state.clients
+      )
     end)
 
     {:ok, new_client_data, state}
@@ -155,7 +191,7 @@ defmodule Gameserver do
 
     # alert existing clients of new bullet
     Gameserver.Socket.broadcast(
-      "new_bullet #{bullet.owner} #{bullet.type} #{Gameserver.Bullet.update_packet(id, bullet)}",
+      "new_bullet #{Gameserver.Bullet.init_packet(id, bullet)}",
       state.socket,
       self(),
       state.clients
@@ -188,6 +224,47 @@ defmodule Gameserver do
     )
 
     {:ok, removed_bullet, %{state | bullets: remaining_bullets}}
+  end
+
+  defp new_barrel(state, barrel) do
+    id = state.next_barrel_id
+    state = Map.put(state, :barrels, Map.put(state.barrels, id, barrel))
+
+    # alert existing clients of new barrel
+    Gameserver.Socket.broadcast(
+      "new_barrel #{Gameserver.Barrel.init_packet(id, barrel)}",
+      state.socket,
+      self(),
+      state.clients
+    )
+
+    {:ok, barrel, Map.put(state, :next_barrel_id, id + 1)}
+  end
+
+  defp update_barrel(state, id, barrel) do
+    case state.barrels[id] do
+      nil ->
+        {:error, :error, state}
+
+      barrel_data ->
+        merged_barrel_data = Map.merge(barrel_data, barrel)
+
+        {:ok, merged_barrel_data, %{state | barrels: %{state.barrels | id => merged_barrel_data}}}
+    end
+  end
+
+  defp remove_barrel(state, id) do
+    {removed_barrel, remaining_barrels} = Map.pop(state.barrels, id)
+
+    # alert existing clients of removed barrel
+    Gameserver.Socket.broadcast(
+      "remove_barrel #{id}",
+      state.socket,
+      self(),
+      state.clients
+    )
+
+    {:ok, removed_barrel, %{state | barrels: remaining_barrels}}
   end
 
   defp fire_client_active_secondary_weapon(state, client_key) do
@@ -289,7 +366,50 @@ defmodule Gameserver do
   end
 
   defp tick_client({k, client}, state, dt) do
-    {:ok, _, state} = update_client(state, k, Gameserver.Client.update(client, dt))
+    {:ok, updated_client, state} = update_client(state, k, Gameserver.Client.update(client, dt))
+
+    state =
+      Enum.reduce(state.barrels, state, fn {barrel_id, barrel}, state ->
+        {w, h} = barrel.size
+        # average of two dimensions and halved for radius
+        r = (w + h) / 4
+        # add client size to radius
+        {w, h} = client.size
+        r = r + (w + h) / 4
+
+        case Gameserver.Barrel.check_collide_circle(
+               client.pos,
+               updated_client.pos,
+               barrel.pos,
+               r
+             ) do
+          true ->
+            p =
+              Graphmath.Vec2.add(
+                barrel.pos,
+                Graphmath.Vec2.scale(
+                  Graphmath.Vec2.normalize(
+                    Graphmath.Vec2.subtract(updated_client.pos, barrel.pos)
+                  ),
+                  r
+                )
+              )
+
+            updated_client |> IO.inspect()
+
+            {:ok, _, state} =
+              update_client(
+                state,
+                k,
+                Gameserver.Client.set_pos(updated_client, p) |> IO.inspect()
+              )
+
+            state
+
+          _ ->
+            state
+        end
+      end)
 
     state =
       case Gameserver.Client.firing?(client) &&
@@ -377,6 +497,40 @@ defmodule Gameserver do
           end
         end
       )
+
+    {updated_bullet, state} =
+      case Gameserver.Bullet.dead?(updated_bullet) do
+        false ->
+          Enum.reduce(state.barrels, {updated_bullet, state}, fn {barrel_id, barrel},
+                                                                 {updated_bullet, state} ->
+            {w, h} = barrel.size
+            # average of two dimensions and halved for radius
+            r = (w + h) / 4
+
+            case Gameserver.Bullet.check_collide_circle(
+                   orig_bullet,
+                   updated_bullet.pos,
+                   barrel.pos,
+                   r
+                 ) do
+              true ->
+                {_, _, new_state} =
+                  update_barrel(
+                    state,
+                    barrel_id,
+                    Gameserver.Barrel.damage(barrel, updated_bullet.damage)
+                  )
+
+                {Gameserver.Bullet.die(updated_bullet), new_state}
+
+              _ ->
+                {updated_bullet, state}
+            end
+          end)
+
+        _ ->
+          {updated_bullet, state}
+      end
 
     case Gameserver.Bullet.dead?(updated_bullet) do
       true ->

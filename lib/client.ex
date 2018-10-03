@@ -65,6 +65,7 @@ defmodule Gameserver.Client do
     end
   end
 
+  def set_pos(client, pos), do: Map.put(client, :pos, pos)
   def change_name(client, new_name), do: Map.put(client, :name, new_name)
   def inc_score(client), do: Map.put(client, :score, client.score + 1)
   def firing?(client), do: client.inputs.fire == 1
@@ -122,8 +123,10 @@ defmodule Gameserver.Client do
 
   defp move(client, dt) do
     m = Graphmath.Vec2.scale(get_movement_vector(client.inputs), client.speed * dt)
-    new_pos = Graphmath.Vec2.add(client.pos, m)
-    Map.put(client, :pos, new_pos)
+    {x, y} = Graphmath.Vec2.add(client.pos, m)
+    x = min(1280 - 32, max(0, x))
+    y = min(720 - 32, max(0, y))
+    set_pos(client, {x, y})
   end
 
   defp get_movement_vector(inputs) when is_map(inputs),
