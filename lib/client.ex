@@ -1,9 +1,13 @@
 defmodule Gameserver.Client do
-  # {host, port}
+  alias Graphmath.Vec2, as: Vec
+
   @enforce_keys [:client, :id]
-  @default_pos {(1280 - 32) / 2, (720 - 32) / 2}
+  @default_pos {0, 0}
+  @client_update_packet_regex ~r/^(\d+),(\d+),(\d+),(\d+),(\d+),(\d+) ([0-9\-\.]+),([0-9\-\.]+)/
 
   defstruct id: nil,
+            # {host, post}
+            # example: {{127, 0, 0, 1}, 58527}
             client: nil,
             name: "Player",
             color: {1.0, 1.0, 1.0, 1.0},
@@ -11,7 +15,7 @@ defmodule Gameserver.Client do
             pos: @default_pos,
             aimpos: {0, 0},
             size: {32, 32},
-            speed: 300,
+            speed: 100,
             health: 100,
             max_health: 100,
             respawn_time: 0,
@@ -19,8 +23,8 @@ defmodule Gameserver.Client do
             active_weapon: 0,
             active_secondary_weapon: 1,
             weapons: %{
-              0 => Gameserver.Weapon.cannon(),
-              1 => Gameserver.Weapon.machinegun()
+              0 => Gameserver.Weapons.cannon(),
+              1 => Gameserver.Weapons.minelayer()
             },
             inputs: %{
               up: 0,
@@ -105,8 +109,6 @@ defmodule Gameserver.Client do
     |> Enum.join(" ")
   end
 
-  @client_update_packet_regex ~r/^(\d+),(\d+),(\d+),(\d+),(\d+),(\d+) ([0-9\-\.]+),([0-9\-\.]+)/
-
   def parse_client_update_packet(payload) do
     p = tl(Regex.run(@client_update_packet_regex, payload))
 
@@ -126,10 +128,10 @@ defmodule Gameserver.Client do
   end
 
   defp move(client, dt) do
-    m = Graphmath.Vec2.scale(get_movement_vector(client.inputs), client.speed * dt)
-    {x, y} = Graphmath.Vec2.add(client.pos, m)
-    x = min(1280 - 32, max(0, x))
-    y = min(720 - 32, max(0, y))
+    m = Vec.scale(get_movement_vector(client.inputs), client.speed * dt)
+    {x, y} = Vec.add(client.pos, m)
+    x = min(1000 - 32, max(-1000, x))
+    y = min(1000 - 32, max(-1000, y))
     set_pos(client, {x, y})
   end
 
@@ -137,5 +139,5 @@ defmodule Gameserver.Client do
     do: get_movement_vector({0 - inputs.left + inputs.right, 0 - inputs.up + inputs.down})
 
   defp get_movement_vector({0, 0}), do: {0, 0}
-  defp get_movement_vector(m), do: Graphmath.Vec2.normalize(m)
+  defp get_movement_vector(m), do: Vec.normalize(m)
 end

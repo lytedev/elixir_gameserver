@@ -3,7 +3,7 @@ defmodule Gameserver.Socket do
 
   use Task
 
-  # TODO: binary protocol
+  # TODO: binary protocol? need easy way to send floats and ints
 
   def start(opts) do
     Logger.info("Socket Open: udp://0.0.0.0:#{to_string(opts.port)} - #{inspect(opts.socket)}")

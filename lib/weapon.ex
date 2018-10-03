@@ -1,6 +1,7 @@
 defmodule Gameserver.Weapon do
+  alias Graphmath.Vec2, as: Vec
+
   defstruct name: "Cannon",
-            type: 0,
             fire_rate: 0.4,
             bullet_spawn_offset: 0.08,
             bullet_speed: 500,
@@ -20,42 +21,23 @@ defmodule Gameserver.Weapon do
     weapon.cooldown <= 0
   end
 
-  def generate_bullet(weapon, pos, direction, owner) do
-    vel = direction |> Graphmath.Vec2.normalize() |> Graphmath.Vec2.scale(weapon.bullet_speed)
+  def generate_bullet(weapon, pos, direction, owner, offset \\ nil) do
+    vel = direction |> Vec.normalize() |> Vec.scale(weapon.bullet_speed)
 
+    case weapon.bullet_spawn_offset do
+      {x, y} -> generate_bullet(weapon, Vec.add(pos, {x, y}), direction, owner, vel)
+      x -> generate_bullet(weapon, Vec.add(pos, Vec.scale(vel, x)), direction, owner, vel)
+    end
+  end
+
+  def generate_bullet(weapon, pos, direction, owner, vel) do
     %Gameserver.Bullet{
       owner: owner,
       type: String.downcase(weapon.name),
-      pos: Graphmath.Vec2.add(pos, Graphmath.Vec2.scale(vel, weapon.bullet_spawn_offset)),
+      pos: pos,
       vel: vel,
       lifetime: weapon.bullet_lifetime,
       damage: weapon.bullet_damage
-    }
-  end
-
-  def cannon() do
-    %Gameserver.Weapon{
-      name: "Cannon",
-      type: 0,
-      fire_rate: 0.4,
-      bullet_spawn_offset: 0.06,
-      bullet_speed: 500,
-      bullet_lifetime: 3,
-      bullet_damage: 20,
-      cooldown: 0
-    }
-  end
-
-  def machinegun() do
-    %Gameserver.Weapon{
-      name: "Machinegun",
-      type: 1,
-      fire_rate: 0.03,
-      bullet_spawn_offset: 0.035,
-      bullet_speed: 1500,
-      bullet_lifetime: 0.25,
-      bullet_damage: 1,
-      cooldown: 0
     }
   end
 end

@@ -2,16 +2,14 @@ defmodule Gameserver do
   require Logger
   use GenServer
 
-  # TODO: cleanup clients that haven't sent data in some time
-  # TODO: handle crashes gracefully with regards to connected clients
-
   @default_port 6090
-  # ~60 UPS
   @update_time_ms 16
+  @num_barrels 100
 
   @initial_state %{
     server_version: "0.1.4",
     last_tick: 0,
+    map_size: {2000, 2000},
     clients: %{},
     bullets: %{},
     barrels: %{},
@@ -46,12 +44,14 @@ defmodule Gameserver do
   def start_link(_opts), do: GenServer.start_link(__MODULE__, generate_barrels(@initial_state))
 
   defp generate_barrels(state) do
+    {w, h} = state.map_size
+
     Map.put(
       state,
       :barrels,
-      Enum.reduce(0..19, %{}, fn id, barrels ->
+      Enum.reduce(0..(@num_barrels - 1), %{}, fn id, barrels ->
         Map.put(barrels, id, %Gameserver.Barrel{
-          pos: {:rand.uniform(1280 - 12), :rand.uniform(720 - 12)}
+          pos: {:rand.uniform(w) - w / 2, :rand.uniform(w) - w / 2}
         })
       end)
     )
@@ -124,7 +124,9 @@ defmodule Gameserver do
 
     state = Map.put(state, :clients, Map.put(state.clients, client, new_client_data))
 
-    Logger.debug("Client Connected: #{inspect(client)}\nNew State: #{inspect(state)}")
+    Logger.debug("Client Connected: #{inspect(client)}\nClients: #{inspect(state.clients)}")
+
+    state.clients |> IO.inspect()
 
     :ok =
       Socket.Datagram.send(
@@ -183,7 +185,7 @@ defmodule Gameserver do
     {old_client, clients} = Map.pop(state.clients, client)
     state = %{state | clients: clients}
 
-    Logger.debug("Client Disconnected: #{inspect(client)}\nNew State: #{inspect(state)}")
+    Logger.debug("Client Disconnected: #{inspect(client)}\nClients: #{inspect(state.clients)}")
 
     Gameserver.Socket.broadcast(
       "remove_client #{old_client.id}",

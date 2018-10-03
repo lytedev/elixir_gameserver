@@ -1,5 +1,8 @@
 defmodule Gameserver.Bullet do
+  alias Graphmath.Vec2, as: Vec
+
   @enforce_keys [:type, :pos, :vel, :lifetime, :damage, :owner]
+  @new_packet_prefix "new_bullet"
 
   defstruct [:type, :pos, :vel, :lifetime, :damage, :owner]
 
@@ -12,7 +15,7 @@ defmodule Gameserver.Bullet do
   end
 
   def update(bullet, dt) do
-    new_pos = Graphmath.Vec2.add(bullet.pos, Graphmath.Vec2.multiply(bullet.vel, {dt, dt}))
+    new_pos = Vec.add(bullet.pos, Vec.multiply(bullet.vel, {dt, dt}))
     new_lifetime = bullet.lifetime - dt
     Map.merge(bullet, %{pos: new_pos, lifetime: new_lifetime})
   end
@@ -30,16 +33,7 @@ defmodule Gameserver.Bullet do
     |> Enum.join(" ")
   end
 
-  @doc """
-  Adapted from https://stackoverflow.com/questions/1073336/circle-line-segment-collision-detection-algorithm
-  """
   def check_collide_circle(bullet, new_pos, pos, r) do
-    d1 = Graphmath.Vec2.subtract(new_pos, bullet.pos)
-    d2 = Graphmath.Vec2.subtract(pos, bullet.pos)
-    p = Graphmath.Vec2.project(d1, d2)
-    d = Graphmath.Vec2.add(bullet.pos, p)
-    f = Graphmath.Vec2.subtract(pos, d)
-    l = Graphmath.Vec2.length(f)
-    l <= r
+    Gameserver.Physics.line_segment_collides_circle?(bullet.pos, new_pos, pos, r)
   end
 end
