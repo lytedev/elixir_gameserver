@@ -52,7 +52,7 @@ defmodule Gameserver do
     do: GenServer.call(game, {:update_client, client, data})
 
   def call_update_client_name(game, client, name),
-    do: GenServer.call(game, {:update_client, Gameserver.Client.change_name(name)})
+    do: GenServer.call(game, {:update_client, Gameserver.Client.change_name(client, name)})
 
   # TODO: handle errors
   defp handle_call_wrapper(res, error_callback \\ fn x -> x end)
