@@ -10,7 +10,7 @@ defmodule Gameserver do
   @update_time_ms 16
 
   @initial_state %{
-    server_version: "0.1.3",
+    server_version: "0.1.4",
     last_tick: 0,
     clients: %{},
     bullets: %{},
@@ -113,7 +113,7 @@ defmodule Gameserver do
     state.clients
     # |> Enum.filter(fn {k, _} -> k != client end)
     |> Enum.each(fn {_, data} ->
-      payload = "new_client #{data.id} #{new_client_data.name}"
+      payload = "new_client #{data.id} #{data.name}"
       Socket.Datagram.send(state.socket, payload, client)
       Logger.debug(payload)
     end)

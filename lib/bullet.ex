@@ -30,8 +30,13 @@ defmodule Gameserver.Bullet do
   Adapted from https://stackoverflow.com/questions/1073336/circle-line-segment-collision-detection-algorithm
   """
   def check_collide_circle(bullet, new_pos, pos, r) do
-    d1 = Graphmath.Vec2.subtract(new_pos, bullet.pos)
-    d2 = Graphmath.Vec2.subtract(pos, bullet.pos)
-    Graphmath.Vec2.length(Graphmath.Vec2.project(d2, d1)) <= r
+    IO.puts("\n--" <> to_string(r))
+    d1 = Graphmath.Vec2.subtract(new_pos, bullet.pos) |> IO.inspect()
+    d2 = Graphmath.Vec2.subtract(pos, bullet.pos) |> IO.inspect()
+
+    p = Graphmath.Vec2.project(d1, d2)
+    d = Graphmath.Vec2.add(bullet.pos, p)
+    f = Graphmath.Vec2.subtract(pos, d)
+    Graphmath.Vec2.length(f) <= r
   end
 end
