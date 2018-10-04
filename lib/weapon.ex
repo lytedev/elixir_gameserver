@@ -25,12 +25,22 @@ defmodule Gameserver.Weapon do
     vel = direction |> Vec.normalize() |> Vec.scale(weapon.bullet_speed)
 
     case weapon.bullet_spawn_offset do
-      {x, y} -> generate_bullet(weapon, Vec.add(pos, {x, y}), direction, owner, vel)
-      x -> generate_bullet(weapon, Vec.add(pos, Vec.scale(vel, x)), direction, owner, vel)
+      {x, y} ->
+        {dx, dy} = direction
+
+        alt_generate_bullet(
+          weapon,
+          Vec.add(pos, Vec.rotate({x, y}, Math.atan2(dy, dx))),
+          owner,
+          vel
+        )
+
+      x ->
+        alt_generate_bullet(weapon, Vec.add(pos, Vec.scale(vel, x)), owner, vel)
     end
   end
 
-  def generate_bullet(weapon, pos, direction, owner, vel) do
+  defp alt_generate_bullet(weapon, pos, owner, vel) do
     %Gameserver.Bullet{
       owner: owner,
       type: String.downcase(weapon.name),

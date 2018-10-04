@@ -4,15 +4,17 @@ defmodule Gameserver do
 
   @default_port 6090
   @update_time_ms 16
-  @num_barrels 100
+  @num_barrels 200
 
   @initial_state %{
-    server_version: "0.1.5", # TODO: get from mix version
+    # TODO: get from mix version
+    server_version: "0.1.5",
     last_tick: 0,
-    map_size: {2000, 2000},
+    map_size: {4000, 4000},
     clients: %{},
     bullets: %{},
     barrels: %{},
+    walls: %{},
     next_bullet_id: 0,
     next_barrel_id: 0
   }
@@ -51,7 +53,7 @@ defmodule Gameserver do
       :barrels,
       Enum.reduce(0..(@num_barrels - 1), %{}, fn id, barrels ->
         Map.put(barrels, id, %Gameserver.Barrel{
-          pos: {:rand.uniform(w) - w / 2, :rand.uniform(w) - w / 2}
+          pos: {:rand.uniform(w) - w / 2, :rand.uniform(h) - h / 2}
         })
       end)
     )
@@ -128,10 +130,12 @@ defmodule Gameserver do
 
     state.clients |> IO.inspect()
 
+    {w, h} = state.map_size
+
     :ok =
       Socket.Datagram.send(
         state.socket,
-        "l2d_test_game v#{state.server_version} accepted #{new_client_data.id}",
+        "l2d_test_game v#{state.server_version} accepted #{new_client_data.id} #{w} #{h}",
         client
       )
 
@@ -147,22 +151,20 @@ defmodule Gameserver do
     # send bullets
     state.bullets
     |> Enum.each(fn {id, bullet} ->
-      Gameserver.Socket.broadcast(
-        "new_bullet #{Gameserver.Bullet.init_packet(id, bullet)}",
+      Socket.Datagram.send(
         state.socket,
-        self(),
-        state.clients
+        "new_bullet #{Gameserver.Bullet.init_packet(id, bullet)}",
+        client
       )
     end)
 
     # send barrels
     state.barrels
     |> Enum.each(fn {id, barrel} ->
-      Gameserver.Socket.broadcast(
-        "new_barrel #{Gameserver.Barrel.init_packet(id, barrel)}",
+      Socket.Datagram.send(
         state.socket,
-        self(),
-        state.clients
+        "new_barrel #{Gameserver.Barrel.init_packet(id, barrel)}",
+        client
       )
     end)
 
@@ -378,7 +380,8 @@ defmodule Gameserver do
   end
 
   defp tick_client({k, client}, state, dt) do
-    {:ok, updated_client, state} = update_client(state, k, Gameserver.Client.update(client, dt))
+    {:ok, updated_client, state} =
+      update_client(state, k, Gameserver.Client.update(client, dt, state.map_size))
 
     cond do
       updated_client.since_last_update >= 10 ->
@@ -460,7 +463,10 @@ defmodule Gameserver do
 
     {updated_bullet, state} =
       Enum.reduce(
-        state.clients |> Enum.filter(fn {key, client} -> client.respawn_time <= 0 end),
+        state.clients
+        |> Enum.filter(fn {key, client} ->
+          client.respawn_time <= 0 && client.id != updated_bullet.owner
+        end),
         {updated_bullet, state},
         fn {client_key, client}, {updated_bullet, state} ->
           {x, y} = client.size

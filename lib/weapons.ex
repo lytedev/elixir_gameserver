@@ -16,11 +16,11 @@ defmodule Gameserver.Weapons do
   def machinegun() do
     %Weapon{
       name: "Machinegun",
-      fire_rate: 0.03,
+      fire_rate: 0.05,
       bullet_spawn_offset: 0.035,
       bullet_speed: 1500,
       bullet_lifetime: 0.25,
-      bullet_damage: 1,
+      bullet_damage: 2,
       cooldown: 0
     }
   end
@@ -29,10 +29,10 @@ defmodule Gameserver.Weapons do
     %Weapon{
       name: "Minelayer",
       fire_rate: 5.0,
-      bullet_spawn_offset: {0, 32},
+      bullet_spawn_offset: {32, 0},
       bullet_speed: 0,
       bullet_lifetime: 10,
-      bullet_damage: 1,
+      bullet_damage: 40,
       cooldown: 0
     }
   end

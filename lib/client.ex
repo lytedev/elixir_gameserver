@@ -3,7 +3,7 @@ defmodule Gameserver.Client do
 
   @enforce_keys [:client, :id]
   @default_pos {0, 0}
-  @client_update_packet_regex ~r/^(\d+),(\d+),(\d+),(\d+),(\d+),(\d+) ([0-9\-\.]+),([0-9\-\.]+)/
+  @client_update_packet_regex ~r/^(\d+),(\d+),(\d+),(\d+),(\d+),(\d+) ([0-9\-\.]+),([0-9\-\.]+) (\d+) (\d+)/
 
   defstruct id: nil,
             # {host, post}
@@ -21,10 +21,11 @@ defmodule Gameserver.Client do
             respawn_time: 0,
             since_last_update: 0,
             active_weapon: 0,
-            active_secondary_weapon: 1,
+            active_secondary_weapon: 2,
             weapons: %{
               0 => Gameserver.Weapons.cannon(),
-              1 => Gameserver.Weapons.minelayer()
+              1 => Gameserver.Weapons.machinegun(),
+              2 => Gameserver.Weapons.minelayer()
             },
             inputs: %{
               up: 0,
@@ -35,7 +36,7 @@ defmodule Gameserver.Client do
               secondary_fire: 0
             }
 
-  def update(client, dt) do
+  def update(client, dt, map_size) do
     # TODO: use function pattern matching instead of all this cond?
     cond do
       dead?(client) ->
@@ -68,7 +69,7 @@ defmodule Gameserver.Client do
             Map.put(weapons, id, Gameserver.Weapon.update(weapon, dt))
           end)
         )
-        |> move(dt)
+        |> move(dt, map_size)
     end
     |> Map.put(:since_last_update, client.since_last_update + dt)
   end
@@ -113,8 +114,18 @@ defmodule Gameserver.Client do
   def parse_client_update_packet(payload) do
     p = tl(Regex.run(@client_update_packet_regex, payload))
 
-    [up, down, left, right, fire, secondary_fire, apx, apy] =
-      p |> Enum.map(&Integer.parse/1) |> Enum.map(&elem(&1, 0))
+    [
+      up,
+      down,
+      left,
+      right,
+      fire,
+      secondary_fire,
+      apx,
+      apy,
+      active_weapon,
+      active_secondary_weapon
+    ] = p |> Enum.map(&Integer.parse/1) |> Enum.map(&elem(&1, 0))
 
     inputs = %{
       up: up,
@@ -125,14 +136,15 @@ defmodule Gameserver.Client do
       secondary_fire: secondary_fire
     }
 
-    {:ok, inputs, {apx, apy}}
+    {:ok, inputs, {apx, apy}, active_weapon, active_secondary_weapon}
   end
 
-  defp move(client, dt) do
+  defp move(client, dt, {w, h}) do
     m = Vec.scale(get_movement_vector(client.inputs), client.speed * dt)
     {x, y} = Vec.add(client.pos, m)
-    x = min(1000 - 32, max(-1000, x))
-    y = min(1000 - 32, max(-1000, y))
+    {cw, ch} = client.size
+    x = min(w / 2 - cw / 2, max(-w / 2 + cw / 2, x))
+    y = min(h / 2 - ch / 2, max(-h / 2 + ch / 2, y))
     set_pos(client, {x, y})
   end
 
