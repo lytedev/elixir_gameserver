@@ -5,7 +5,7 @@ before_script:
   - mix local.hex --force
   - mix deps.get
 
-mix:
+test:
   script:
   - mix test
 
@@ -17,5 +17,5 @@ build:
     - mix release
   artifacts:
     paths:
-      - _build
+      - _build/prod/rel/gameserver/releases/**/*.tar.gz
 
