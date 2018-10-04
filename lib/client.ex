@@ -38,7 +38,7 @@ defmodule Gameserver.Client do
   def update(client, dt) do
     # TODO: use function pattern matching instead of all this cond?
     cond do
-      client.respawn_time > 0 ->
+      dead?(client) ->
         new_client =
           client
           |> Map.put(:respawn_time, client.respawn_time - dt)
@@ -73,11 +73,12 @@ defmodule Gameserver.Client do
     |> Map.put(:since_last_update, client.since_last_update + dt)
   end
 
+  def dead?(client), do: client.respawn_time > 0
   def set_pos(client, pos), do: Map.put(client, :pos, pos)
   def change_name(client, new_name), do: Map.put(client, :name, new_name)
   def inc_score(client), do: Map.put(client, :score, client.score + 1)
-  def firing?(client), do: client.inputs.fire == 1
-  def secondary_firing?(client), do: client.inputs.secondary_fire == 1
+  def firing?(client), do: client.inputs.fire == 1 && not dead?(client)
+  def secondary_firing?(client), do: client.inputs.secondary_fire == 1 && not dead?(client)
   def active_weapon(client), do: client.weapons[client.active_weapon]
   def active_secondary_weapon(client), do: client.weapons[client.active_secondary_weapon]
 

@@ -7,7 +7,7 @@ defmodule Gameserver do
   @num_barrels 100
 
   @initial_state %{
-    server_version: "0.1.5",
+    server_version: "0.1.5", # TODO: get from mix version
     last_tick: 0,
     map_size: {2000, 2000},
     clients: %{},
