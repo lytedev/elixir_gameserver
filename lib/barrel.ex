@@ -6,6 +6,12 @@ defmodule Gameserver.Barrel do
             health: 100_000,
             size: {24, 24}
 
+  def new_random(w, h) do
+    %Gameserver.Barrel{
+      pos: {:rand.uniform(w) - w / 2, :rand.uniform(h) - h / 2}
+    }
+  end
+
   def dead?(barrel) do
     barrel.health <= 0
   end

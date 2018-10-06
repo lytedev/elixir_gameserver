@@ -23,7 +23,7 @@ defmodule Gameserver do
     schedule_update()
     {:ok, socket, _pid} = open_socket(state)
 
-    Logger.debug("Game Process init() Complete: (Self: #{inspect(self())}")
+    Logger.debug(fn -> "Game Process init() Complete: (Self: #{inspect(self())}" end)
 
     {:ok, Map.merge(state, %{last_tick: DateTime.utc_now(), socket: socket})}
   end
@@ -47,16 +47,12 @@ defmodule Gameserver do
 
   defp generate_barrels(state) do
     {w, h} = state.map_size
+    count = 0..(@num_barrels - 1)
 
-    Map.put(
-      state,
-      :barrels,
-      Enum.reduce(0..(@num_barrels - 1), %{}, fn id, barrels ->
-        Map.put(barrels, id, %Gameserver.Barrel{
-          pos: {:rand.uniform(w) - w / 2, :rand.uniform(h) - h / 2}
-        })
-      end)
-    )
+    barrels =
+      Enum.reduce(count, %{}, fn i, b -> Map.put(b, i, Gameserver.Barrel.new_random(w, h)) end)
+
+    %{state | barrels: barrels}
   end
 
   # internal helpers
@@ -103,10 +99,10 @@ defmodule Gameserver do
   defp new_client(state, client, opts) do
     new_client_data = %Gameserver.Client{
       client: client,
-      id: :crypto.strong_rand_bytes(32) |> Base.url_encode64() |> binary_part(0, 32)
+      id: 32 |> :crypto.strong_rand_bytes() |> Base.url_encode64() |> binary_part(0, 32)
     }
 
-    Keyword.put(opts, :name, opts[:name] || new_client_data)
+    opts = Keyword.put(opts, :name, opts[:name] || new_client_data)
 
     new_client_data = Gameserver.Client.change_name(new_client_data, opts[:name])
 
@@ -126,9 +122,9 @@ defmodule Gameserver do
 
     state = Map.put(state, :clients, Map.put(state.clients, client, new_client_data))
 
-    Logger.debug("Client Connected: #{inspect(client)}\nClients: #{inspect(state.clients)}")
-
-    state.clients |> IO.inspect()
+    Logger.debug(fn ->
+      "Client Connected: #{inspect(client)}\nClients: #{inspect(state.clients)}"
+    end)
 
     {w, h} = state.map_size
 
@@ -145,7 +141,7 @@ defmodule Gameserver do
     |> Enum.each(fn {_, data} ->
       payload = "new_client #{data.id} #{data.name}"
       Socket.Datagram.send(state.socket, payload, client)
-      Logger.debug(payload)
+      Logger.debug(fn -> payload end)
     end)
 
     # send bullets
@@ -187,7 +183,9 @@ defmodule Gameserver do
     {old_client, clients} = Map.pop(state.clients, client)
     state = %{state | clients: clients}
 
-    Logger.debug("Client Disconnected: #{inspect(client)}\nClients: #{inspect(state.clients)}")
+    Logger.debug(fn ->
+      "Client Disconnected: #{inspect(client)}\nClients: #{inspect(state.clients)}"
+    end)
 
     Gameserver.Socket.broadcast(
       "remove_client #{old_client.id}",
@@ -383,75 +381,75 @@ defmodule Gameserver do
     {:ok, updated_client, state} =
       update_client(state, k, Gameserver.Client.update(client, dt, state.map_size))
 
-    cond do
-      updated_client.since_last_update >= 10 ->
-        {:ok, _, state} = remove_client(state, k)
-        state
+    if updated_client.since_last_update >= 10 do
+      {:ok, _, state} = remove_client(state, k)
+      state
+    else
+      state =
+        Enum.reduce(state.barrels, state, fn {barrel_id, barrel}, state ->
+          {w, h} = barrel.size
+          # average of two dimensions and halved for radius
+          r = (w + h) / 4
+          # add client size to radius
+          {w, h} = client.size
+          r = r + (w + h) / 4
 
-      true ->
-        state =
-          Enum.reduce(state.barrels, state, fn {barrel_id, barrel}, state ->
-            {w, h} = barrel.size
-            # average of two dimensions and halved for radius
-            r = (w + h) / 4
-            # add client size to radius
-            {w, h} = client.size
-            r = r + (w + h) / 4
-
-            case Gameserver.Barrel.check_collide_circle(
-                   client.pos,
-                   updated_client.pos,
-                   barrel.pos,
-                   r
-                 ) do
-              true ->
-                p =
-                  Graphmath.Vec2.add(
-                    barrel.pos,
-                    Graphmath.Vec2.scale(
-                      Graphmath.Vec2.normalize(
-                        Graphmath.Vec2.subtract(updated_client.pos, barrel.pos)
-                      ),
-                      r
-                    )
-                  )
-
-                updated_client
-
-                {:ok, _, state} =
-                  update_client(
-                    state,
-                    k,
-                    Gameserver.Client.set_pos(updated_client, p)
-                  )
-
-                state
-
-              _ ->
-                state
-            end
-          end)
-
-        state =
-          case Gameserver.Client.firing?(client) &&
-                 Gameserver.Client.active_weapon(client) |> Gameserver.Weapon.can_fire?() do
+          case Gameserver.Barrel.check_collide_circle(
+                 client.pos,
+                 updated_client.pos,
+                 barrel.pos,
+                 r
+               ) do
             true ->
-              {:ok, _, state} = fire_client_active_weapon(state, k)
+              p =
+                Graphmath.Vec2.add(
+                  barrel.pos,
+                  Graphmath.Vec2.scale(
+                    Graphmath.Vec2.normalize(
+                      Graphmath.Vec2.subtract(updated_client.pos, barrel.pos)
+                    ),
+                    r
+                  )
+                )
+
+              updated_client
+
+              {:ok, _, state} =
+                update_client(
+                  state,
+                  k,
+                  Gameserver.Client.set_pos(updated_client, p)
+                )
+
               state
 
-            false ->
+            _ ->
               state
           end
+        end)
 
-        case Gameserver.Client.secondary_firing?(client) &&
-               Gameserver.Client.active_secondary_weapon(client) |> Gameserver.Weapon.can_fire?() do
+      state =
+        case Gameserver.Client.firing?(client) &&
+               client |> Gameserver.Client.active_weapon() |> Gameserver.Weapon.can_fire?() do
           true ->
-            {:ok, _, state} = fire_client_active_secondary_weapon(state, k)
+            {:ok, _, state} = fire_client_active_weapon(state, k)
             state
 
           false ->
             state
         end
+
+      case Gameserver.Client.secondary_firing?(client) &&
+             client
+             |> Gameserver.Client.active_secondary_weapon()
+             |> Gameserver.Weapon.can_fire?() do
+        true ->
+          {:ok, _, state} = fire_client_active_secondary_weapon(state, k)
+          state
+
+        false ->
+          state
+      end
     end
   end
 
@@ -494,25 +492,23 @@ defmodule Gameserver do
               new_health = new_client.health
 
               new_state =
-                cond do
-                  old_health > 0 && new_health <= 0 && owner != nil ->
-                    Gameserver.Socket.screen_message(
-                      owner.name <> " killed " <> new_client.name <> ". (#{owner.score + 1})",
-                      new_state.socket,
-                      new_state.clients
+                if old_health > 0 && new_health <= 0 && owner != nil do
+                  Gameserver.Socket.screen_message(
+                    owner.name <> " killed " <> new_client.name <> ". (#{owner.score + 1})",
+                    new_state.socket,
+                    new_state.clients
+                  )
+
+                  {:ok, _, new_state} =
+                    update_client(
+                      new_state,
+                      owner.client,
+                      Gameserver.Client.inc_score(owner)
                     )
 
-                    {:ok, _, new_state} =
-                      update_client(
-                        new_state,
-                        owner.client,
-                        Gameserver.Client.inc_score(owner)
-                      )
-
-                    new_state
-
-                  true ->
-                    new_state
+                  new_state
+                else
+                  new_state
                 end
 
               {Gameserver.Bullet.die(updated_bullet), new_state}

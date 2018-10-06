@@ -44,15 +44,13 @@ defmodule Gameserver.Client do
           client
           |> Map.put(:respawn_time, client.respawn_time - dt)
 
-        cond do
-          new_client.respawn_time <= 0 ->
-            new_client
-            |> Map.put(:respawn_time, 0)
-            |> Map.put(:health, new_client.max_health)
-            |> Map.put(:pos, @default_pos)
-
-          true ->
-            new_client
+        if new_client.respawn_time <= 0 do
+          new_client
+          |> Map.put(:respawn_time, 0)
+          |> Map.put(:health, new_client.max_health)
+          |> Map.put(:pos, @default_pos)
+        else
+          new_client
         end
 
       client.health <= 0 ->
@@ -61,8 +59,8 @@ defmodule Gameserver.Client do
         |> Map.put(:respawn_time, 5)
 
       true ->
-        Map.put(
-          client,
+        client
+        |> Map.put(
           :weapons,
           client.weapons
           |> Enum.reduce(%{}, fn {id, weapon}, weapons ->
@@ -95,14 +93,21 @@ defmodule Gameserver.Client do
     active_weapon = active_weapon(client)
     active_secondary_weapon = active_secondary_weapon(client)
 
+    active_cooldown = active_weapon.cooldown / active_weapon.fire_rate
+
+    active_secondary_cooldown =
+      active_secondary_weapon.cooldown / active_secondary_weapon.fire_rate
+
+    hp = client.health / client.max_health
+
     [
       client.size |> Tuple.to_list() |> Enum.map(&to_string/1) |> Enum.join(","),
       client.color |> Tuple.to_list() |> Enum.map(&to_string/1) |> Enum.join(","),
       client.pos |> Tuple.to_list() |> Enum.map(&to_string/1) |> Enum.join(","),
       client.aimpos |> Tuple.to_list() |> Enum.map(&to_string/1) |> Enum.join(","),
-      (active_weapon.cooldown / active_weapon.fire_rate) |> to_string(),
-      (active_secondary_weapon.cooldown / active_secondary_weapon.fire_rate) |> to_string(),
-      (client.health / client.max_health) |> to_string(),
+      active_cooldown |> to_string(),
+      active_secondary_cooldown |> to_string(),
+      hp |> to_string(),
       client.score |> to_string(),
       client.respawn_time |> to_string(),
       client.id

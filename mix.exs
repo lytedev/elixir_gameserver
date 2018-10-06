@@ -21,6 +21,8 @@ defmodule Gameserver.MixProject do
   defp deps do
     [
       {:math, "~> 0.3"},
+      {:credo, "~> 0.10.2"},
+      {:dogma, "~> 0.1.16"},
       {:graphmath, "~> 1.0"},
       {:distillery, "~> 2.0"},
       {:socket, "~> 0.3.13"}

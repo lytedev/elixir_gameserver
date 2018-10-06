@@ -53,20 +53,18 @@ defmodule Gameserver.Socket do
           name
       end
 
-    cond do
+    if String.starts_with?(v, server_version) do
       # TODO: check that "connect" is in there
       # extract initial name?
 
-      String.starts_with?(v, server_version) ->
-        {:ok, new_client} = Gameserver.call_new_client(game, client, name: name)
-
-      true ->
-        :ok =
-          Socket.Datagram.send(
-            socket,
-            "disconnected invalid_version_connect client:#{v} server:#{server_version} connect",
-            client
-          )
+      {:ok, new_client} = Gameserver.call_new_client(game, client, name: name)
+    else
+      :ok =
+        Socket.Datagram.send(
+          socket,
+          "disconnected invalid_version_connect client:#{v} server:#{server_version} connect",
+          client
+        )
     end
   end
 
@@ -112,10 +110,10 @@ defmodule Gameserver.Socket do
   end
 
   defp handle_message(m, client, socket, game, _) do
-    # Logger.debug(
-    # "Bad Message Received: #{inspect(m <> <<0>>)} from #{inspect(client)} over #{
-    # inspect(socket)
-    # }"
-    # )
+    Logger.debug(fn ->
+      "Bad Message Received: #{inspect(m <> <<0>>)} from #{inspect(client)} over #{
+        inspect(socket)
+      }"
+    )
   end
 end
