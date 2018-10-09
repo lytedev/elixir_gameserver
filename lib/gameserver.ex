@@ -1,61 +1,45 @@
 defmodule Gameserver do
+  alias Gameserver.Gamestate, as: Gamestate
   require Logger
   use GenServer
 
   @default_port 6090
   @update_time_ms 16
-  @num_barrels 200
 
   @initial_state %{
-    # TODO: get from mix version
-    server_version: "0.1.5",
-    last_tick: 0,
-    map_size: {4000, 4000},
-    clients: %{},
-    bullets: %{},
-    barrels: %{},
-    walls: %{},
-    next_bullet_id: 0,
-    next_barrel_id: 0
+    socket: nil,
+    gamestate: nil
   }
 
-  def init(state) do
-    schedule_update()
-    {:ok, socket, _pid} = open_socket(state)
+  # init
 
-    Logger.debug(fn -> "Game Process init() Complete: (Self: #{inspect(self())}" end)
-
-    {:ok, Map.merge(state, %{last_tick: DateTime.utc_now(), socket: socket})}
-  end
+  defp schedule_update(), do: Process.send_after(self(), :update, @update_time_ms)
 
   def open_socket(state) do
     # TODO: supervised, so the socket can restart without restarting the entire
-    # game
-    # start a socket for network interactions
+    # game, would also allow for multiple "sockets" including a websocket
+    # endpoint for browser-based clients
     port = state[:port] || @default_port
     {:ok, socket} = Socket.UDP.open(port)
 
     {:ok, pid} =
       Task.start_link(Gameserver.Socket, :start, [
-        %{socket: socket, game: self(), port: port, server_version: state.server_version}
+        %{socket: socket, game: self(), port: port}
       ])
 
     {:ok, socket, pid}
   end
 
-  def start_link(_opts), do: GenServer.start_link(__MODULE__, generate_barrels(@initial_state))
-
-  defp generate_barrels(state) do
-    {w, h} = state.map_size
-    count = 0..(@num_barrels - 1)
-
-    barrels =
-      Enum.reduce(count, %{}, fn i, b -> Map.put(b, i, Gameserver.Barrel.new_random(w, h)) end)
-
-    %{state | barrels: barrels}
+  def init(state) do
+    schedule_update()
+    {:ok, socket, _pid} = open_socket(state)
+    {:ok, Map.merge(state, %{gamestate: Gamestate.init(), socket: socket})}
   end
 
-  # internal helpers
+  def start_link(_opts), do: GenServer.start_link(__MODULE__, @initial_state)
+
+  # public call wrappers
+
   def call_get_all_clients(game), do: GenServer.call(game, :get_all_clients)
   def call_new_client(game, client, opts), do: GenServer.call(game, {:new_client, client, opts})
   def call_remove_client(game, client), do: GenServer.call(game, {:remove_client, client})
@@ -66,17 +50,18 @@ defmodule Gameserver do
   def call_update_client_name(game, client, name),
     do: GenServer.call(game, {:update_client, Gameserver.Client.change_name(client, name)})
 
-  # TODO: handle errors
+  # call helpers
+
   defp handle_call_wrapper(res, error_callback \\ fn x -> x end)
 
-  defp handle_call_wrapper({:ok, reply, state}, _error_callback),
-    do: {:reply, {:ok, reply}, state}
+  defp handle_call_wrapper({:ok, reply, state}, _error_callback) do
+    {:reply, {:ok, reply}, state}
+  end
 
   defp handle_call_wrapper({_, _reply, state}, error_callback),
     do: {:reply, :error, state} |> error_callback.()
 
   # genserver callbacks
-  def handle_call(:get_all_clients, _from, state), do: {:reply, {:ok, state.clients}, state}
 
   def handle_call({:new_client, client, opts}, _from, state),
     do: handle_call_wrapper(new_client(state, client, opts))
@@ -96,6 +81,7 @@ defmodule Gameserver do
   end
 
   # mutations
+
   defp new_client(state, client, opts) do
     new_client_data = %Gameserver.Client{
       client: client,
@@ -313,8 +299,6 @@ defmodule Gameserver do
 
   # internal update tick stuff
   def handle_info(:update, state), do: {:noreply, game_tick(state)}
-
-  defp schedule_update(), do: Process.send_after(self(), :update, @update_time_ms)
 
   defp get_dt(state) do
     now = DateTime.utc_now()
@@ -561,13 +545,6 @@ defmodule Gameserver do
       _ ->
         {_, _, state} = update_bullet(state, k, updated_bullet)
         state
-    end
-  end
-
-  defp get_client_by_id(state, id) do
-    case Enum.filter(state.clients, fn {_, c} -> c.id == id end) do
-      [{_, client}] -> client
-      _ -> nil
     end
   end
 end

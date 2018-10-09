@@ -36,48 +36,42 @@ defmodule Gameserver.Client do
               secondary_fire: 0
             }
 
-  def update(client, dt, map_size) do
-    # TODO: use function pattern matching instead of all this cond?
-    cond do
-      dead?(client) ->
-        new_client =
-          client
-          |> Map.put(:respawn_time, client.respawn_time - dt)
+  def init(remote, name) do
+    %Gameserver.Client{
+      client: remote,
+      id: 32 |> :crypto.strong_rand_bytes() |> Base.url_encode64() |> binary_part(0, 32)
+    }
+    |> change_name(name)
+  end
 
-        if new_client.respawn_time <= 0 do
-          new_client
-          |> Map.put(:respawn_time, 0)
-          |> Map.put(:health, new_client.max_health)
-          |> Map.put(:pos, @default_pos)
-        else
-          new_client
-        end
+  defp move(client, dt) do
+    m = Vec.scale(get_movement_vector(client.inputs), client.speed * dt)
+    {x, y} = Vec.add(client.pos, m)
+    set_pos(client, {x, y})
+  end
 
-      client.health <= 0 ->
-        client
-        |> Map.put(:health, client.max_health)
-        |> Map.put(:respawn_time, 5)
+  def tick_respawn_time!(client, dt) do
+    %{client | respawn_time: client.respawn_time - dt}
+  end
 
-      true ->
-        client
-        |> Map.put(
-          :weapons,
-          client.weapons
-          |> Enum.reduce(%{}, fn {id, weapon}, weapons ->
-            Map.put(weapons, id, Gameserver.Weapon.update(weapon, dt))
-          end)
-        )
-        |> move(dt, map_size)
-    end
-    |> Map.put(:since_last_update, client.since_last_update + dt)
+  def respawn!(client) do
+    %{client | respawn_time: 0, health: client.max_health, pos: @default_pos}
+  end
+
+  def die!(client) do
+    client
+    |> Map.put(:health, client.max_health)
+    |> Map.put(:respawn_time, 5)
   end
 
   def dead?(client), do: client.respawn_time > 0
+  def should_respawn?(client), do: dead?(client) && client.respawn_time <= 0
+
   def set_pos(client, pos), do: Map.put(client, :pos, pos)
   def change_name(client, new_name), do: Map.put(client, :name, new_name)
   def inc_score(client), do: Map.put(client, :score, client.score + 1)
   def firing?(client), do: client.inputs.fire == 1 && not dead?(client)
-  def secondary_firing?(client), do: client.inputs.secondary_fire == 1 && not dead?(client)
+  def secondary_firing?(client), do: client.inputs.secondary_fire == 1 and not dead?(client)
   def active_weapon(client), do: client.weapons[client.active_weapon]
   def active_secondary_weapon(client), do: client.weapons[client.active_secondary_weapon]
 
@@ -89,7 +83,40 @@ defmodule Gameserver.Client do
     Map.put(client, :weapons, Map.put(client.weapons, weapon_id, weapon))
   end
 
-  def update_packet(client) do
+  def tick_dead!(client, dt) do
+    new_client = client |> tick_respawn_time!(dt)
+
+    if should_respawn?(client) do
+      new_client |> respawn!()
+    else
+      new_client
+    end
+  end
+
+  def tick!(client, dt) do
+    # TODO: use function pattern matching instead of all this cond?
+    cond do
+      dead?(client) ->
+        tick_dead!(client, dt)
+
+      client.health <= 0 ->
+        die!(client)
+
+      true ->
+        client
+        |> Map.put(
+          :weapons,
+          client.weapons
+          |> Enum.reduce(%{}, fn {id, weapon}, weapons ->
+            Map.put(weapons, id, Gameserver.Weapon.update(weapon, dt))
+          end)
+        )
+        |> move(dt)
+    end
+    |> Map.put(:since_last_update, client.since_last_update + dt)
+  end
+
+  def get_update_packet!(client) do
     active_weapon = active_weapon(client)
     active_secondary_weapon = active_secondary_weapon(client)
 
@@ -144,18 +171,12 @@ defmodule Gameserver.Client do
     {:ok, inputs, {apx, apy}, active_weapon, active_secondary_weapon}
   end
 
-  defp move(client, dt, {w, h}) do
-    m = Vec.scale(get_movement_vector(client.inputs), client.speed * dt)
-    {x, y} = Vec.add(client.pos, m)
-    {cw, ch} = client.size
-    x = min(w / 2 - cw / 2, max(-w / 2 + cw / 2, x))
-    y = min(h / 2 - ch / 2, max(-h / 2 + ch / 2, y))
-    set_pos(client, {x, y})
-  end
-
+  # getters
+  @spec get_movement_vector(map) :: {number, number}
   defp get_movement_vector(inputs) when is_map(inputs),
     do: get_movement_vector({0 - inputs.left + inputs.right, 0 - inputs.up + inputs.down})
 
+  @spec get_movement_vector({number, number}) :: {number, number}
   defp get_movement_vector({0, 0}), do: {0, 0}
   defp get_movement_vector(m), do: Vec.normalize(m)
 end
