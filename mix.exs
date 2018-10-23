@@ -20,10 +20,10 @@ defmodule Gameserver.MixProject do
 
   defp deps do
     [
-      {:ecs, "~> 0.5"},
+      {:dialyxir, "~> 1.0.0-rc.3", only: [:dev], runtime: false},
+      {:credo, "~> 0.10.2", only: [:dev], runtime: false},
+      {:ecs, git: "https://github.com/lytedev/ecs.git", tag: "v0.6.1"},
       {:math, "~> 0.3"},
-      {:credo, "~> 0.10.2"},
-      {:dogma, "~> 0.1.16"},
       {:graphmath, "~> 1.0"},
       {:distillery, "~> 2.0"},
       {:socket, "~> 0.3.13"}
